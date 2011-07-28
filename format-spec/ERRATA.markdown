@@ -1,4 +1,4 @@
-The GUID structure is actually a ULONG, USHORT (not another ULONG), USHORT,
+The GUID structure is actually a ULONG, USHORT (**not another ULONG**), USHORT,
 and 8 bytes.  As a result, the structure is 16 bytes long.  This appears to be
 a typo, and the correct information appears on [Wikipedia]
 (http://en.wikipedia.org/wiki/UUID) and in the docs for
