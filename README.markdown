@@ -2,7 +2,7 @@ Agent Py
 ========
 Clippy for Linux.
 
-'Cuz FUCK YOU that's why.
+['Cuz FUCK YOU that's why.](http://i.imgur.com/Ods5g.jpg)
 
 * * *
 
