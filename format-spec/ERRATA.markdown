@@ -7,4 +7,5 @@ a typo, and the correct information appears on [Wikipedia]
 Bit 4 of the ACSCHARACTERINFO flags ulong appears to specify whether voice
 output is **DISABLED**, not *enabled*; i.e. set to 1 to **disable** voice
 output.  Bit 5 *might* specify whether it's enabled, judging from the fact
-that bits 8 and 9 correspond to word balloon enable/disable.
+that bits 8 and 9 correspond to word balloon disable/enable, but this is pure
+speculation.
