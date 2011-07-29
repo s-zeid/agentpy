@@ -69,6 +69,13 @@ class ACSParser(object):
                    "replace_top_image_of_frame", "image_index", "unknown",
                    "region_data_flag", "x_offset", "y_offset", "width",
                    "height", "region_data", "SIZE"])
+ 
+ acsimageinfo = namedtuple("acsimageinfo", ["image_data", "checksum_maybe",
+                 "SIZE"])
+ acsimageinfo_data = namedtuple("acsimageinfo_data", ["unknown", "width",
+                      "height", "image_compressed", "image_data",
+                      "rgndata_size_compressed", "rgndata_size_uncompressed",
+                      "rgndata_size", "rgndata", "SIZE"])
  # "Public" methods
  def __init__(self, data):
   self.data = data
@@ -388,8 +395,8 @@ class ACSParser(object):
   offset += location.SIZE
   checksum_maybe = self.parse_ulong(offset)
   offset += 4
-  imagedata = self.parse_acsimageinfo_data(*location)
-  return self.acsimageinfo(...)
+  image_data = self.parse_acsimageinfo_data(*location)
+  return self.acsimageinfo(image_data, checksum_maybe, offset - start)
  def parse_acsimageinfo_data(self, offset, size, *_):
   start = offset
   unknown = self.parse_byte(offset)
