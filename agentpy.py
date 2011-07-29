@@ -24,7 +24,7 @@ class AgentCharacter(object):
 class ACSParser(object):
  acsheader = namedtuple("acsheader", ["signature", "acscharacterinfo",
               "acsanimationinfo", "acsimageinfo", "acsaudioinfo", "SIZE"])
- acslocator = namedtuple("acslocator", ["offset", "size", "SIZE"])
+ acslocator = namedtuple("acslocator", ["offset", "data_size", "SIZE"])
  acscharacterinfo = namedtuple("acscharacterinfo", ["minor_version",
                      "major_version", "localizedinfo", "guid", "width",
                      "height", "transparent_color_index", "flags",
@@ -44,11 +44,30 @@ class ACSParser(object):
                 "fgcolor", "bgcolor", "border_color", "font_name",
                 "font_height", "font_weight", "italic_flag", "unknown",
                 "SIZE"])
+ rect = namedtuple("rect", ["upper_left", "lower_right", "SIZE"])
  rgbquad = namedtuple("rgbquad", ["red", "green", "blue", "reserved", "int",
             "hex", "SIZE"])
+ rgndata = namedtuple("rgndata", ["header_size", "region_type", "num_rects",
+            "buffer_size", "bounds", "rects", "SIZE"])
  trayicon = namedtuple("trayicon", ["mono_size", "mono_dib",
                        "color_size", "color_dib", "SIZE"])
  state = namedtuple("state", ["name", "animations", "SIZE"])
+ 
+ acsanimationinfo = namedtuple("acsanimationinfo", ["name", "animation_data",
+                     "SIZE"])
+ animation_data = namedtuple("animation_data", ["name", "transition_type",
+                   "return_animation", "frames", "SIZE"])
+ acsframeinfo = namedtuple("acsframeinfo", ["images", "audio_index",
+                 "frame_duration_csecs", "exit_to_frame_index",
+                 "frame_branches", "mouth_overlays", "SIZE"])
+ acsframeimage = namedtuple("acsframeimage", ["image_index", "x_offset",
+                  "y_offset", "SIZE"])
+ branchinfo = namedtuple("branchinfo", ["jump_to_frame_index",
+               "probability_percent", "SIZE"])
+ acsoverlayinfo = namedtuple("acsoverlayinfo", ["overlay_type",
+                   "replace_top_image_of_frame", "image_index", "unknown",
+                   "region_data_flag", "x_offset", "y_offset", "width",
+                   "height", "region_data", "SIZE"])
  # "Public" methods
  def __init__(self, data):
   self.data = data
@@ -67,9 +86,9 @@ class ACSParser(object):
   return self.acsheader(
    sig,
    self.parse_acscharacterinfo(*self.parse_acslocator(4)),
-   self.parse_acsanimationinfo(*self.parse_acslocator(12)),
-   self.parse_acsimageinfo(*self.parse_acslocator(20)),
-   self.parse_acsaudioinfo(*self.parse_acslocator(28)),
+   self.parse_acsanimationinfo_list(*self.parse_acslocator(12)),
+   self.parse_acsimageinfo_list(*self.parse_acslocator(20)),
+   self.parse_acsaudioinfo_list(*self.parse_acslocator(28)),
   36)
  def parse_acsheader_test(self):
   sig = self.parse_ulong(0)
@@ -78,12 +97,14 @@ class ACSParser(object):
   return self.acsheader(
    sig,
    self.parse_acscharacterinfo(*self.parse_acslocator(4)),
-   None, None, None,
+   self.parse_acsanimationinfo_list(*self.parse_acslocator(12)),
+   None, None,
   36)
  def parse_acslocator(self, offset):
   return self.acslocator(
    *list(struct.unpack("<LL", self.data[offset:offset+8])) + [8]
   )
+ # ACS Character Info (metadata)
  def parse_acscharacterinfo(self, offset, size, *_):
   self.check(offset, size)
   start = offset
@@ -133,7 +154,7 @@ class ACSParser(object):
   offset - start)
  def parse_localizedinfo(self, acslocator):
   offset = acslocator.offset
-  size = acslocator.size
+  size = acslocator.data_size
   l = self.parse_list(offset, self.parse_ushort, 2,
        self.parse_localizedinfo_locale, lambda i: i.SIZE)
   if l.SIZE != size:
@@ -243,6 +264,111 @@ class ACSParser(object):
                                lambda i: i.SIZE)
   offset += animations.SIZE
   return self.state(name, animations, offset - start)
+ # ACS Animation Info
+ def parse_acsanimationinfo_list(self, offset, size, *_):
+  return self.parse_list(offset, self.parse_ulong, 4,
+                         self.parse_acsanimationinfo, lambda i: i.SIZE)
+ def parse_acsanimationinfo(self, offset):
+  start = offset
+  name = self.parse_string(offset)
+  offset += name.SIZE
+  animdata_location = self.parse_acslocator(offset)
+  offset += animdata_location.SIZE
+  animdata = self.parse_animation_data(*animdata_location)
+  return self.acsanimationinfo(name, animdata, offset - start)
+ def parse_animation_data(self, offset, size, *_):
+  start = offset
+  name = self.parse_string(offset)
+  offset += name.SIZE
+  transition_type = {0: "use_return_animation",
+                     1: "use_exit_branches",
+                     2: None}.get(self.parse_byte(offset), None)
+  offset += 1
+  return_animation = self.parse_string(offset)
+  offset += return_animation.SIZE
+  frames = self.parse_list(offset, self.parse_ushort, 2,
+                           self.parse_acsframeinfo, lambda i: i.SIZE)
+  offset += frames.SIZE
+  if offset - start != size:
+   raise ValueError("malformed animation data")
+  return self.animation_data(
+   name, transition_type, return_animation, frames,
+  size)
+ def parse_acsframeinfo(self, offset):
+  start = offset
+  images = self.parse_list(offset, self.parse_ushort, 2,
+                           self.parse_acsframeimage, lambda i: i.SIZE)
+  offset += images.SIZE
+  audio_index = self.parse_ushort(offset)
+  frame_duration_csecs = self.parse_ushort(offset + 2)
+  exit_to_frame_index = self.parse_short(offset + 4)
+  offset += 6
+  frame_branches = self.parse_list(offset, self.parse_byte, 1,
+                                   self.parse_branchinfo, lambda i: i.SIZE)
+  offset += frame_branches.SIZE
+  mouth_overlays = self.parse_list(offset, self.parse_byte, 1,
+                                   self.parse_acsoverlayinfo,lambda i:i.SIZE)
+  offset += mouth_overlays.SIZE
+  return self.acsframeinfo(
+   images, audio_index, frame_duration_csecs, exit_to_frame_index,
+   frame_branches, mouth_overlays,
+  offset - start)
+ def parse_acsframeimage(self, offset):
+  # TODO: image_index should eventually be the actual image data maybe?
+  image_index = self.parse_ulong(offset)
+  x_offset = self.parse_short(offset + 4)
+  y_offset = self.parse_short(offset + 6)
+  return self.acsframeimage(image_index, x_offset, y_offset, 8)
+ def parse_branchinfo(self, offset):
+  jump_to_frame_index = self.parse_ushort(offset)
+  probability_percent = self.parse_ushort(offset + 2)
+  return self.branchinfo(jump_to_frame_index, probability_percent, 4)
+ def parse_acsoverlayinfo(self, offset):
+  start = offset
+  overlay_type = {0: "mouth_closed", 1: "mouth_wide_open_1",
+                  2: "mouth_wide_open_2", 3: "mouth_wide_open_3",
+                  4: "mouth_wide_open_4", 5: "mouth_medium",
+                  6: "mouth_narrow"}.get(self.parse_byte(offset), None)
+  replace_top_image_of_frame = bool(self.parse_byte(offset + 1))
+  offset += 2
+  image_index = self.parse_ushort(offset)
+  offset += 2
+  unknown = self.parse_byte(offset)
+  region_data_flag = bool(self.parse_byte(offset + 1))
+  offset += 2
+  x_offset = self.parse_short(offset)
+  y_offset = self.parse_short(offset + 2)
+  width = self.parse_ushort(offset + 4) * 2
+  height = self.parse_ushort(offset + 6) * 2
+  offset += 8
+  if region_data_flag:
+   region_data_size = self.parse_ulong(offset)
+   offset += 4
+   region_data = self.parse_rgndata(offset, region_data_size)
+   offset += region_data.SIZE
+  else:
+   region_data = None
+  return self.acsoverlayinfo(
+   overlay_type, replace_top_image_of_frame, image_index, unknown,
+   region_data_flag, x_offset, y_offset, width, height, region_data,
+  offset - start)
+ def parse_rgndata(self, offset, size):
+  print "region data yay"
+  start = offset
+  header_size = self.parse_ulong(offset)
+  region_type = self.parse_ulong(offset + 4)
+  num_rects = self.parse_ulong(offset + 8)
+  buffer_size = self.parse_ulong(offset + 12)
+  bounds = self.parse_rect(offset + 16)
+  offset += 32
+  rects = self.parse_list(offset, lambda x: (size-32)/16, 0, self.parse_rect,
+                          lambda i: i.SIZE)
+  offset += rects.SIZE
+  if offset - start != size:
+   raise ValueError("malformed rect array")
+  return self.rgndata(
+   header_size, region_type, num_rects, buffer_size, bounds, rects, size
+  )
  # Primitives
  def parse_byte(self, offset):
   return struct.unpack("<B", self.data[offset:offset+1])[0]
@@ -257,10 +383,23 @@ class ACSParser(object):
  def parse_wchar(self, offset):
   return struct.unpack("<h", self.data[offset:offset+2])[0]
  # Other common types
+ def parse_datablock(self, offset):
+  # (header--size in bytes) + 4 bytes in header
+  size = self.parse_ulong(offset) + 4
+  offset += 4
+  return ACSDataBlock(self.data[offset:offset+size-4], size)
  def parse_guid(self, offset):
   return uuid.UUID(bytes_le=self.data[offset:offset+16])
  def parse_langid(self, offset):
   return self.parse_ushort(offset)
+ def parse_rect(self, offset):
+  top_left_x = self.parse_long(offset)
+  top_left_y = self.parse_long(offset + 4)
+  bottom_right_x = self.parse_long(offset + 8)
+  bottom_right_y = self.parse_long(offset + 12)
+  return self.rect(
+   (top_left_x, top_left_y), (bottom_right_x, bottom_right_y), 16
+  )
  def parse_rgbquad(self, offset):
   red = self.parse_byte(offset)
   green = self.parse_byte(offset + 1)
@@ -288,10 +427,17 @@ class ACSParser(object):
    n += 1
   return ACSList(ret, offset - start)
  def parse_string(self, offset):
-  # ((header--number of UTF-16LE chars + 1) * 2 bytes) + 4 bytes in header
-  size = ((self.parse_ulong(offset) + 1) * 2) + 4
+  num_chars = self.parse_ulong(offset)
+  terminator_len = 2 if num_chars else 0
   offset += 4
-  return ACSString(self.data[offset:offset+size-6], size)
+  size = (num_chars * 2) + terminator_len + 4
+  return ACSString(self.data[offset:offset+size-terminator_len-4], size)
+
+class ACSDataBlock(bytes):
+ def __new__(cls, data, size):
+  return super(ACSDataBlock, cls).__new__(cls, data)
+ def __init__(self, data, size):
+  self.SIZE = size
 
 class ACSDict(dict):
  def __new__(cls, iterable, size):
