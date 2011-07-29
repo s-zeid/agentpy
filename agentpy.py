@@ -55,8 +55,9 @@ class ACSParser(object):
  
  acsanimationinfo = namedtuple("acsanimationinfo", ["name", "animation_data",
                      "SIZE"])
- animation_data = namedtuple("animation_data", ["name", "transition_type",
-                   "return_animation", "frames", "SIZE"])
+ acsanimationinfo_data = namedtuple("acsanimationinfo_data", ["name",
+                          "transition_type", "return_animation", "frames",
+                          "SIZE"])
  acsframeinfo = namedtuple("acsframeinfo", ["images", "audio_index",
                  "frame_duration_csecs", "exit_to_frame_index",
                  "frame_branches", "mouth_overlays", "SIZE"])
@@ -147,6 +148,8 @@ class ACSParser(object):
    tray_icon = None
   stateinfo = self.parse_stateinfo(offset)
   offset += stateinfo.SIZE
+  if offset - start != size:
+   raise ValueError("malformed acscharacterinfo")
   return self.acscharacterinfo(
    minor_version, major_version, localizedinfo, guid, width, height,
    transparent_color_index, flags, anim_set_major, anim_set_minor, voiceinfo,
@@ -266,17 +269,20 @@ class ACSParser(object):
   return self.state(name, animations, offset - start)
  # ACS Animation Info
  def parse_acsanimationinfo_list(self, offset, size, *_):
-  return self.parse_list(offset, self.parse_ulong, 4,
-                         self.parse_acsanimationinfo, lambda i: i.SIZE)
+  ret = self.parse_list(offset, self.parse_ulong, 4,
+                        self.parse_acsanimationinfo, lambda i: i.SIZE)
+  if ret.SIZE != size:
+   raise ValueError("malformed acsanimationinfo list")
+  return ret
  def parse_acsanimationinfo(self, offset):
   start = offset
   name = self.parse_string(offset)
   offset += name.SIZE
   animdata_location = self.parse_acslocator(offset)
   offset += animdata_location.SIZE
-  animdata = self.parse_animation_data(*animdata_location)
+  animdata = self.parse_acsanimationinfo_data(*animdata_location)
   return self.acsanimationinfo(name, animdata, offset - start)
- def parse_animation_data(self, offset, size, *_):
+ def parse_acsanimationinfo_data(self, offset, size, *_):
   start = offset
   name = self.parse_string(offset)
   offset += name.SIZE
@@ -291,7 +297,7 @@ class ACSParser(object):
   offset += frames.SIZE
   if offset - start != size:
    raise ValueError("malformed animation data")
-  return self.animation_data(
+  return self.acsanimationinfo_data(
    name, transition_type, return_animation, frames,
   size)
  def parse_acsframeinfo(self, offset):
@@ -369,6 +375,50 @@ class ACSParser(object):
   return self.rgndata(
    header_size, region_type, num_rects, buffer_size, bounds, rects, size
   )
+ # ACS Image Info List
+ def parse_acsimageinfo_list(self, offset, size, *_):
+  ret = self.parse_list(offset, self.parse_ulong, 4,
+                        self.parse_acsimageinfo, lambda i: i.SIZE)
+  if ret.SIZE != size:
+   raise ValueError("malformed acsimageinfo list")
+  return ret
+ def parse_acsimageinfo(self, offset):
+  start = offset
+  location = self.parse_acslocator(offset)
+  offset += location.SIZE
+  checksum_maybe = self.parse_ulong(offset)
+  offset += 4
+  imagedata = self.parse_acsimageinfo_data(*location)
+  return self.acsimageinfo(...)
+ def parse_acsimageinfo_data(self, offset, size, *_):
+  start = offset
+  unknown = self.parse_byte(offset)
+  offset += 1
+  width = self.parse_ushort(offset)
+  height = self.parse_ushort(offset + 2)
+  offset += 4
+  compressed = bool(self.parse_byte(offset))
+  offset += 1
+  image_data = self.parse_datablock(offset)
+  offset += image_data.SIZE
+  if compressed:
+   image_data = self.decompress(image_data)
+  rgndata_size_compressed = self.parse_ulong(offset)
+  rgndata_size_uncompressed = self.parse_ulong(offset + 4)
+  offset += 8
+  rgndata_compressed = bool(rgndata_size_compressed)
+  rgndata_size = rgndata_size_compressed or rgndata_size_uncompressed
+  rgndata = self.data[offset:offset+rgndata_size]
+  if rgndata_compressed:
+   rgndata = self.decompress(rgndata)
+   rgndata_size = rgndata_size_uncompressed
+  rgndata = ACSParser(rgndata).parse_rgndata(0, rgndata_size)
+  if offset - start != size:
+   raise ValueError("malformed acsimageinfo_data")
+  return self.acsimageinfo_data(
+   unknown, width, height, compressed, image_data, rgndata_size_compressed,
+   rgndata_size_uncompressed, rgndata_size, rgndata,
+  size)
  # Primitives
  def parse_byte(self, offset):
   return struct.unpack("<B", self.data[offset:offset+1])[0]
