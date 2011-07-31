@@ -86,6 +86,28 @@ class ACSParser(object):
  def check(self, offset, size):
   if self.size < (offset + size):
    raise ValueError("data must be at least %d bytes long" % (offset + size))
+ @classmethod
+ def decompress(cls, data):
+  if len(data) < 7 or data[0] != "\x00" or data[-6:] != "\xFF" * 6:
+   raise ValueError("malformed compressed data")
+  data = Bits(data)
+  ret = bytearray()
+  offset = 1
+  while offset < data.bitlength - 6:
+   if not data[offset]: # Decompressed byte follows
+    data.append(Bits.to_bytes(data[offset+1:offset+9])[0])
+    offset += 9
+    continue
+   # Compressed
+   offset += 1
+   n_bytes = 2
+   n_1_bits = len([i for i in data[offset:offset+3] if i])
+   offset += n_1_bits + 1
+   next_bit_count = (6,9,12,20)[n_1_bits]
+   dst_offset = self.data[offset:offset+next_bit_count]
+   dst_offset += (1,65,577,4673)[next_bit_count]
+   offset += next_bit_count
+   ...
  # ACS-specific types
  def parse_acsheader(self):
   sig = self.parse_ulong(0)
@@ -404,11 +426,11 @@ class ACSParser(object):
   width = self.parse_ushort(offset)
   height = self.parse_ushort(offset + 2)
   offset += 4
-  compressed = bool(self.parse_byte(offset))
+  image_compressed = bool(self.parse_byte(offset))
   offset += 1
   image_data = self.parse_datablock(offset)
   offset += image_data.SIZE
-  if compressed:
+  if image_compressed:
    image_data = self.decompress(image_data)
   rgndata_size_compressed = self.parse_ulong(offset)
   rgndata_size_uncompressed = self.parse_ulong(offset + 4)
@@ -423,8 +445,8 @@ class ACSParser(object):
   if offset - start != size:
    raise ValueError("malformed acsimageinfo_data")
   return self.acsimageinfo_data(
-   unknown, width, height, compressed, image_data, rgndata_size_compressed,
-   rgndata_size_uncompressed, rgndata_size, rgndata,
+   unknown, width, height, image_compressed, image_data,
+   rgndata_size_compressed, rgndata_size_uncompressed, rgndata_size, rgndata,
   size)
  # Primitives
  def parse_byte(self, offset):
@@ -515,6 +537,43 @@ class ACSString(unicode):
   return super(ACSString, cls).__new__(cls, data, "utf_16_le", "strict")
  def __init__(self, data, size):
   self.SIZE = size
+
+class Bits(object):
+ __slots__ = ["data", "bitlength", "next"]
+ def __init__(self, data):
+  self.data = data
+  self.bitlength = len(data) * 8
+  self.next = itertools.islice(self, 0, len(self), 1)
+ def __contains__(self, item):
+  if not len(self):
+   return False
+  if item == 1:
+   return self.data != "\x00"
+  if item == 0:
+   for i in self:
+    if i == 0:
+     return True
+  return False
+ def __getitem__(self, item):
+  if isinstance(item, slice):
+   return tuple(itertools.islice(self, *item.indices(len(self))))
+  byte = item // 8
+  bit = item % 8
+  return int(bin(ord(self.data[byte]))[2:][bit])
+ def __len__(self):
+  return self.bitlength
+ @classmethod
+ def to_bytes(bits):
+  ret = bytearray(); x = 0; n = 0
+  for i in bits:
+   x += i
+   if n == 7:
+    ret.append(x)
+    n = x = 0
+   else:
+    x <<= 1
+    n += 1
+  return ret
 
 def test(character="clippit"):
  return AgentCharacter(character + ".acs")
