@@ -88,6 +88,8 @@ class ACSParser(object):
    raise ValueError("data must be at least %d bytes long" % (offset + size))
  @classmethod
  def decompress(cls, data):
+  # I like to call this algorithim the "Shitty Agent Compression Klusterfuck"
+  # (SACK) algorithim
   if len(data) < 7 or data[0] != "\x00" or data[-6:] != "\xFF" * 6:
    raise ValueError("malformed compressed data")
   data = Bits(data)
@@ -104,7 +106,7 @@ class ACSParser(object):
    n_1_bits = len([i for i in data[offset:offset+3] if i])
    offset += n_1_bits + 1
    next_bit_count = (6,9,12,20)[n_1_bits]
-   dst_offset = self.data[offset:offset+next_bit_count]
+   dst_offset = Bits.to_bytes(self.data[offset:offset+next_bit_count])
    dst_offset += (1,65,577,4673)[next_bit_count]
    offset += next_bit_count
    ...
