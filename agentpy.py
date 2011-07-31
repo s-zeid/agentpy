@@ -106,7 +106,7 @@ class ACSParser(object):
    n_1_bits = len([i for i in data[offset:offset+3] if i])
    offset += n_1_bits + 1
    next_bit_count = (6,9,12,20)[n_1_bits]
-   dst_offset = Bits.to_bytes(data[offset:offset+next_bit_count])
+   dst_offset = Bits.to_bytes(data[offset:offset+next_bit_count])[0]
    dst_offset += (1,65,577,4673)[next_bit_count]
    offset += next_bit_count
    ...
