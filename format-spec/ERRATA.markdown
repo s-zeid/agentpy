@@ -1,5 +1,5 @@
-MS Agent Character Data Specification Errata
-============================================
+MS Agent Character Data Specification 1.3 Errata
+================================================
 by [Scott Zeid](http://srwz.us/)
 
 [Original spec](http://www.lebeausoftware.org/download.aspx?ID=25001fc7-18e9-49a4-90dc-21e8ff46aa1d),
