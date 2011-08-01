@@ -464,7 +464,7 @@ class ACSParser(object):
   image_data = self.parse_datablock(offset)
   offset += image_data.SIZE
   if image_compressed:
-   image_data = self.decompress(image_data, ((width + 3) & 0xFC) * height)
+   image_data = self.decompress_sack(image_data, ((width + 3) & 0xFC) * height)
   rgndata_size_compressed = self.parse_ulong(offset)
   rgndata_size_uncompressed = self.parse_ulong(offset + 4)
   offset += 8
@@ -473,7 +473,7 @@ class ACSParser(object):
   rgndata = self.data[offset:offset+rgndata_size]
   if rgndata_compressed:
    rgndata_size = rgndata_size_uncompressed
-   rgndata = self.decompress(rgndata, rgndata_size)
+   rgndata = self.decompress_sack(rgndata, rgndata_size)
   rgndata = ACSParser(rgndata).parse_rgndata(0, rgndata_size)
   if offset - start != size:
    raise ValueError("malformed acsimageinfo_data")
