@@ -8,6 +8,7 @@
 
 """
 
+import itertools
 import os
 import struct
 import sys
@@ -87,29 +88,59 @@ class ACSParser(object):
   if self.size < (offset + size):
    raise ValueError("data must be at least %d bytes long" % (offset + size))
  @classmethod
- def decompress(cls, data):
-  # I like to call this algorithim the "Shitty Agent Compression Klusterfuck"
-  # (SACK) algorithim
-  if len(data) < 7 or data[0] != "\x00" or data[-6:] != "\xFF" * 6:
+ def decompress_sack(cls, data, dst_size):
+  """Decompress data encoded in the proprietary SACK format."""
+  # SACK = Shitty Agent Compression Klusterfuck
+  if len(data) < 7 or data[0] != 0 or data[-6:] != b"\xFF" * 6:
    raise ValueError("malformed compressed data")
-  data = Bits(data)
-  ret = bytearray()
-  offset = 1
-  while offset < data.bitlength - 6:
-   if not data[offset]: # Decompressed byte follows
-    data.append(Bits.to_bytes(data[offset+1:offset+9])[0])
-    offset += 9
+  src = Bits(data)
+  dst = bytearray(dst_size)
+  src_n = 8; dst_ip = 0
+  while src_n < src.bitlength:
+   if not src[src_n]:
+    # Decompressed byte follows
+    dst[dst_ip] = Bits.to_int(src[src_n+1:src_n+9])
+    src_n += 9; dst_ip += 1
     continue
-   # Compressed
-   offset += 1
+   # Compressed data follows
+   src_n += 1
    n_bytes = 2
-   n_1_bits = len([i for i in data[offset:offset+3] if i])
-   offset += n_1_bits + 1
+   # Get number of bits in next number
+   n_1_bits = 0
+   while n_1_bits < 3:
+    if not src[src_n]:
+     src_n += 1
+     break
+    src_n += 1
+    n_1_bits += 1
    next_bit_count = (6,9,12,20)[n_1_bits]
-   dst_offset = Bits.to_bytes(data[offset:offset+next_bit_count])[0]
-   dst_offset += (1,65,577,4673)[next_bit_count]
-   offset += next_bit_count
-   ...
+   # Get read offset from insertion point in destination buffer
+   dst_ip_offset = Bits.to_int(src[src_n:src_n+next_bit_count])
+   src_n += next_bit_count
+   # Detect end of stream
+   if next_bit_count == 20:
+    if dst_ip_offset == 0xFFFFF: break
+    n_bytes += 1
+   dst_ip_offset += (1,65,577,4673)[n_1_bits]
+   # Get number of bytes to copy
+   n_1_bits = 0
+   while n_1_bits < 12:
+    src_n += 1
+    if not src[src_n - 1]: break
+    n_1_bits += 1
+   if n_1_bits == 12: raise ValueError("malformed data at " + hex(src_n-12))
+   if n_1_bits:
+    n_bytes += Bits.to_int((1,) * n_1_bits)
+    n_bytes += Bits.to_int(src[src_n:src_n+n_1_bits])
+   src_n += n_1_bits
+   # Now, COPY the damn fuckers!
+   n_copied = 0
+   while n_copied < n_bytes:
+    dst[dst_ip] = dst[dst_ip-dst_ip_offset]
+    dst_ip += 1
+    n_copied += 1
+  # I finally did it!  Praise Ballmer!
+  return dst
  # ACS-specific types
  def parse_acsheader(self):
   sig = self.parse_ulong(0)
@@ -433,7 +464,7 @@ class ACSParser(object):
   image_data = self.parse_datablock(offset)
   offset += image_data.SIZE
   if image_compressed:
-   image_data = self.decompress(image_data)
+   image_data = self.decompress(image_data, ((width + 3) & 0xFC) * height)
   rgndata_size_compressed = self.parse_ulong(offset)
   rgndata_size_uncompressed = self.parse_ulong(offset + 4)
   offset += 8
@@ -441,8 +472,8 @@ class ACSParser(object):
   rgndata_size = rgndata_size_compressed or rgndata_size_uncompressed
   rgndata = self.data[offset:offset+rgndata_size]
   if rgndata_compressed:
-   rgndata = self.decompress(rgndata)
    rgndata_size = rgndata_size_uncompressed
+   rgndata = self.decompress(rgndata, rgndata_size)
   rgndata = ACSParser(rgndata).parse_rgndata(0, rgndata_size)
   if offset - start != size:
    raise ValueError("malformed acsimageinfo_data")
@@ -543,7 +574,7 @@ class ACSString(unicode):
 class Bits(object):
  __slots__ = ["data", "bitlength", "next"]
  def __init__(self, data):
-  self.data = data
+  self.data = bytearray(data)
   self.bitlength = len(data) * 8
   self.next = itertools.islice(self, 0, len(self), 1)
  def __contains__(self, item):
@@ -561,21 +592,31 @@ class Bits(object):
    return tuple(itertools.islice(self, *item.indices(len(self))))
   byte = item // 8
   bit = item % 8
-  return int(bin(ord(self.data[byte]))[2:][bit])
+  return int(bin(self.data[byte])[2:].zfill(8)[-bit-1])
  def __len__(self):
   return self.bitlength
  @classmethod
- def to_bytes(bits):
-  ret = bytearray(); x = 0; n = 0
-  for i in bits:
-   x += i
-   if n == 7:
-    ret.append(x)
-    n = x = 0
-   else:
-    x <<= 1
-    n += 1
+ def to_bytes(cls, bits):
+  if not isinstance(bits, (list, tuple, Bits)):
+   raise TypeError("bits must be a list, tuple, or Bits")
+  ret = bytearray(); byte = ""; n = 0
+  while n < len(bits):
+   ret.append(int("".join([str(i) for i in reversed(bits[n:n+8])]), 2))
+   n += 8
   return ret
+ @classmethod
+ def to_int(cls, bits):
+  if not isinstance(bits, (list, tuple, Bits)):
+   raise TypeError("bits must be a list, tuple, or Bits")
+  string = ""; byte = ""; n = 0
+  while n < len(bits):
+   add = "".join([str(i) for i in reversed(bits[n:n+8])])
+   if sys.byteorder == "little":
+    string = add + string
+   else:
+    string += add
+   n += 8
+  return int(string, 2)
 
 def test(character="clippit"):
  return AgentCharacter(character + ".acs")
@@ -583,3 +624,20 @@ def test(character="clippit"):
 def testd(character="clippit"):
  with open(character + ".acs", "rb") as f:
   return f.read()
+
+def test_sack():
+ # Sample data taken from Remy Lebeau's MS Agent Character Data Specification
+ # at http://j.mp/msagentcharspec (mirror: http://j.mp/msagentcharspecmirror)
+ compressed = bytearray(b"\x00@\x00\x04\x10\xd0\x90\x80B\xed\x98\x01\xb7\xff"
+                        b"\xff\xff\xff\xff\xff")
+ expected_result = bytearray(b" \x00\x00\x00\x01\x00\x00\x00\x00\x00\x00\x00"
+                             b"\xa8\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00"
+                             b"\x00\x00\x00\x00\x00\x00\x00\x00\x00")
+ actual_result = ACSParser.decompress_sack(compressed, len(expected_result))
+ if expected_result == actual_result:
+  print "it works"
+  return True
+ print "doesn't work"
+ print "expected_result = " + repr(expected_result)
+ print "actual_result = " + repr(actual_result)
+ return False
