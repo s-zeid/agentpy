@@ -79,12 +79,15 @@ class ACSParser(object):
                       "height", "image_compressed", "image_data",
                       "rgndata_size_compressed", "rgndata_size_uncompressed",
                       "rgndata_size", "rgndata", "SIZE"])
+ 
+ acsaudioinfo = namedtuple("acsaudioinfo", ["audio_data", "checksum_maybe",
+                 "SIZE"])
  # "Public" methods
  def __init__(self, data):
   self.data = data if isinstance(data, bytes) else bytes(data)
   self.size = len(data)
  def parse(self):
-  return self.parse_acsheader_test()
+  return self.parse_acsheader()
  # Helper methods
  def check(self, offset, size):
   if self.size < (offset + size):
@@ -174,17 +177,6 @@ class ACSParser(object):
    self.parse_acsanimationinfo_list(*self.parse_acslocator(12)),
    self.parse_acsimageinfo_list(*self.parse_acslocator(20)),
    self.parse_acsaudioinfo_list(*self.parse_acslocator(28)),
-  36)
- def parse_acsheader_test(self):
-  sig = self.parse_ulong(0)
-  if sig != 0xabcdabc3:
-   raise ValueError("not a valid Agent character file")
-  return self.acsheader(
-   sig,
-   self.parse_acscharacterinfo(*self.parse_acslocator(4)),
-   self.parse_acsanimationinfo_list(*self.parse_acslocator(12)),
-   self.parse_acsimageinfo_list(*self.parse_acslocator(20)),
-   None,
   36)
  def parse_acslocator(self, offset):
   return self.acslocator(
@@ -354,6 +346,7 @@ class ACSParser(object):
   return self.state(name, animations, offset - start)
  # ACS Animation Info
  def parse_acsanimationinfo_list(self, offset, size, *_):
+  self.check(offset, size)
   ret = self.parse_list(offset, self.parse_ulong, 4,
                         self.parse_acsanimationinfo, lambda i: i.SIZE)
   if ret.SIZE != size:
@@ -368,6 +361,7 @@ class ACSParser(object):
   animdata = self.parse_acsanimationinfo_data(*animdata_location)
   return self.acsanimationinfo(name, animdata, offset - start)
  def parse_acsanimationinfo_data(self, offset, size, *_):
+  self.check(offset, size)
   start = offset
   name = self.parse_string(offset)
   offset += name.SIZE
@@ -444,6 +438,7 @@ class ACSParser(object):
    region_data_flag, x_offset, y_offset, width, height, region_data,
   offset - start)
  def parse_rgndata(self, offset, size):
+  self.check(offset, size)
   start = offset
   header_size = self.parse_ulong(offset)
   region_type = self.parse_ulong(offset + 4)
@@ -461,6 +456,7 @@ class ACSParser(object):
   )
  # ACS Image Info List
  def parse_acsimageinfo_list(self, offset, size, *_):
+  self.check(offset, size)
   ret = self.parse_list(offset, self.parse_ulong, 4,
                         self.parse_acsimageinfo, lambda i: i.SIZE)
   if ret.SIZE != size:
@@ -475,6 +471,7 @@ class ACSParser(object):
   image_data = self.parse_acsimageinfo_data(*location)
   return self.acsimageinfo(image_data, checksum_maybe, offset - start)
  def parse_acsimageinfo_data(self, offset, size, *_):
+  self.check(offset, size)
   start = offset
   unknown = self.parse_byte(offset)
   offset += 1
@@ -504,6 +501,26 @@ class ACSParser(object):
    unknown, width, height, image_compressed, image_data,
    rgndata_size_compressed, rgndata_size_uncompressed, rgndata_size, rgndata,
   size)
+ # ACS Audio Info List
+ def parse_acsaudioinfo_list(self, offset, size, *_):
+  self.check(offset, size)
+  ret = self.parse_list(offset, self.parse_ulong, 4,
+                        self.parse_acsaudioinfo, lambda i: i.SIZE)
+  if ret.SIZE != size:
+   raise ValueError("malformed acsaudioinfo list")
+  return ret
+ def parse_acsaudioinfo(self, offset):
+  start = offset
+  audio_data_location = self.parse_acslocator(offset)
+  offset += audio_data_location.SIZE
+  checksum_maybe = self.parse_ulong(offset)
+  offset += 4
+  audio_data = self.parse_audio_data(*audio_data_location)
+  return self.acsaudioinfo(audio_data, checksum_maybe, offset - start)
+ def parse_audio_data(self, offset, size, *_):
+  self.check(offset, size)
+  audio_data = self.data[offset:offset+size]
+  return audio_data
  # Primitives
  def parse_byte(self, offset):
   return struct.unpack("<B", self.data[offset:offset+1])[0]
