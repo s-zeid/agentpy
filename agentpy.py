@@ -210,7 +210,7 @@ class ACSParser(object):
    tray_icon = None
   stateinfo = self.parse_stateinfo(offset)
   offset += stateinfo.SIZE
-  if offset - start != size:
+  if offset - start + localizedinfo_location.data_size != size:
    raise ValueError("malformed acscharacterinfo")
   return self.acscharacterinfo(
    minor_version, major_version, localizedinfo, guid, width, height,
