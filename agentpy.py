@@ -16,6 +16,8 @@ import uuid
 
 from collections import namedtuple
 
+import bitstring
+
 class AgentCharacter(object):
  def __init__(self, filename):
   with open(filename, "rb") as f:
@@ -48,8 +50,8 @@ class ACSParser(object):
  rect = namedtuple("rect", ["upper_left", "lower_right", "SIZE"])
  rgbquad = namedtuple("rgbquad", ["red", "green", "blue", "reserved", "int",
             "hex", "SIZE"])
- rgndata = namedtuple("rgndata", ["header_size", "region_type", "num_rects",
-            "buffer_size", "bounds", "rects", "SIZE"])
+ rgndata = namedtuple("rgndata", ["region_type", "num_rects", "buffer_size",
+            "bounds", "rects", "SIZE"])
  trayicon = namedtuple("trayicon", ["mono_size", "mono_dib",
                        "color_size", "color_dib", "SIZE"])
  state = namedtuple("state", ["name", "animations", "SIZE"])
@@ -91,18 +93,34 @@ class ACSParser(object):
  def decompress_sack(cls, data, dst_size):
   """Decompress data encoded in the proprietary SACK format."""
   # SACK = Shitty Agent Compression Klusterfuck
-  if len(data) < 7 or data[0] != 0 or data[-6:] != b"\xFF" * 6:
+  def to_int(bits):
+   bits = bits[:]
+   bits.append("0b" + "0" * (8 - bits.len % 8))
+   bits.byteswap()
+   bits.reverse()
+   return bits.uintle
+  data = str(data)
+  if len(data) < 7 or data[0] != "\x00" or data[-6:] != b"\xFF" * 6:
    raise ValueError("malformed compressed data")
-  src = Bits(data)
+  #src = bitarray.bitarray(endian="little")
+  #src.fromstring(data)
+  src = bitstring.BitArray(bytes=data)
+  src.byteswap()
+  src.reverse()
   dst = bytearray(dst_size)
   src_n = 8; dst_ip = 0
-  while src_n < src.bitlength:
+  while src_n < src.len:
+   #print "==========================================================="
+   #print repr(dst[:dst_ip])
+   #print "src_n = "+str(src_n)+" bits; dst_ip = "+str(dst_ip)+" bytes"
    if not src[src_n]:
     # Decompressed byte follows
-    dst[dst_ip] = Bits.to_int(src[src_n+1:src_n+9])
+    #print "uncompressed,", src[src_n+1:src_n+9], to_int(src[src_n+1:src_n+9])
+    dst[dst_ip] = to_int(src[src_n+1:src_n+9])
     src_n += 9; dst_ip += 1
     continue
    # Compressed data follows
+   #print "compressed,",
    src_n += 1
    n_bytes = 2
    # Get number of bits in next number
@@ -114,31 +132,39 @@ class ACSParser(object):
     src_n += 1
     n_1_bits += 1
    next_bit_count = (6,9,12,20)[n_1_bits]
+   #print "next_bit_count="+str(next_bit_count),
    # Get read offset from insertion point in destination buffer
-   dst_ip_offset = Bits.to_int(src[src_n:src_n+next_bit_count])
+   dst_ip_offset = to_int(src[src_n:src_n+next_bit_count])
    src_n += next_bit_count
    # Detect end of stream
    if next_bit_count == 20:
-    if dst_ip_offset == 0xFFFFF: break
+    #print dst_ip_offset,
+    if dst_ip_offset == 0xFFFFF:
+     #print
+     break
     n_bytes += 1
    dst_ip_offset += (1,65,577,4673)[n_1_bits]
+   #print "dst_ip_offset="+str(dst_ip_offset)
    # Get number of bytes to copy
    n_1_bits = 0
    while n_1_bits < 12:
     src_n += 1
     if not src[src_n - 1]: break
     n_1_bits += 1
+   #print "n_1_bits="+str(n_1_bits),
    if n_1_bits == 12: raise ValueError("malformed data at " + hex(src_n-12))
    if n_1_bits:
-    n_bytes += Bits.to_int((1,) * n_1_bits)
-    n_bytes += Bits.to_int(src[src_n:src_n+n_1_bits])
+    n_bytes += to_int(src[src_n-n_1_bits-1:src_n-1])
+    n_bytes += to_int(src[src_n:src_n+n_1_bits])
    src_n += n_1_bits
+   #print "n_bytes="+str(n_bytes)
    # Now, COPY the damn fuckers!
    n_copied = 0
    while n_copied < n_bytes:
     dst[dst_ip] = dst[dst_ip-dst_ip_offset]
     dst_ip += 1
     n_copied += 1
+  #print "==========================================================="
   # I finally did it!  Praise Ballmer!
   return dst
  # ACS-specific types
@@ -161,7 +187,8 @@ class ACSParser(object):
    sig,
    self.parse_acscharacterinfo(*self.parse_acslocator(4)),
    self.parse_acsanimationinfo_list(*self.parse_acslocator(12)),
-   None, None,
+   self.parse_acsimageinfo_list(*self.parse_acslocator(20)),
+   None,
   36)
  def parse_acslocator(self, offset):
   return self.acslocator(
@@ -423,7 +450,10 @@ class ACSParser(object):
  def parse_rgndata(self, offset, size):
   print "region data yay"
   start = offset
-  header_size = self.parse_ulong(offset)
+  print repr(self.data[offset:offset+4])
+  rgndata_size = self.parse_ulong(offset)
+  if rgndata_size != size:
+   raise ValueError("malformed rgndata")
   region_type = self.parse_ulong(offset + 4)
   num_rects = self.parse_ulong(offset + 8)
   buffer_size = self.parse_ulong(offset + 12)
@@ -433,9 +463,9 @@ class ACSParser(object):
                           lambda i: i.SIZE)
   offset += rects.SIZE
   if offset - start != size:
-   raise ValueError("malformed rect array")
+   raise ValueError("malformed rgndata")
   return self.rgndata(
-   header_size, region_type, num_rects, buffer_size, bounds, rects, size
+   region_type, num_rects, buffer_size, bounds, rects, size
   )
  # ACS Image Info List
  def parse_acsimageinfo_list(self, offset, size, *_):
