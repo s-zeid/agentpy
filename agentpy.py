@@ -601,53 +601,6 @@ class ACSString(unicode):
  def __init__(self, data, size):
   self.SIZE = size
 
-class Bits(object):
- __slots__ = ["data", "bitlength", "next"]
- def __init__(self, data):
-  self.data = bytearray(data)
-  self.bitlength = len(data) * 8
-  self.next = itertools.islice(self, 0, len(self), 1)
- def __contains__(self, item):
-  if not len(self):
-   return False
-  if item == 1:
-   return self.data != "\x00"
-  if item == 0:
-   for i in self:
-    if i == 0:
-     return True
-  return False
- def __getitem__(self, item):
-  if isinstance(item, slice):
-   return tuple(itertools.islice(self, *item.indices(len(self))))
-  byte = item // 8
-  bit = item % 8
-  return int(bin(self.data[byte])[2:].zfill(8)[-bit-1])
- def __len__(self):
-  return self.bitlength
- @classmethod
- def to_bytes(cls, bits):
-  if not isinstance(bits, (list, tuple, Bits)):
-   raise TypeError("bits must be a list, tuple, or Bits")
-  ret = bytearray(); byte = ""; n = 0
-  while n < len(bits):
-   ret.append(int("".join([str(i) for i in reversed(bits[n:n+8])]), 2))
-   n += 8
-  return ret
- @classmethod
- def to_int(cls, bits):
-  if not isinstance(bits, (list, tuple, Bits)):
-   raise TypeError("bits must be a list, tuple, or Bits")
-  string = ""; byte = ""; n = 0
-  while n < len(bits):
-   add = "".join([str(i) for i in reversed(bits[n:n+8])])
-   if sys.byteorder == "little":
-    string = add + string
-   else:
-    string += add
-   n += 8
-  return int(string, 2)
-
 def test(character="clippit"):
  return AgentCharacter(character + ".acs")
 
