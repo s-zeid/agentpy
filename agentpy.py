@@ -25,9 +25,11 @@ class AgentCharacter(object):
   self.data = parser.parse()
 
 class ACSParser(object):
+ # Data structures
  acsheader = namedtuple("acsheader", ["signature", "acscharacterinfo",
               "acsanimationinfo", "acsimageinfo", "acsaudioinfo", "SIZE"])
  acslocator = namedtuple("acslocator", ["offset", "data_size", "SIZE"])
+ 
  acscharacterinfo = namedtuple("acscharacterinfo", ["minor_version",
                      "major_version", "localizedinfo", "guid", "width",
                      "height", "transparent_color_index", "flags",
@@ -47,11 +49,6 @@ class ACSParser(object):
                 "fgcolor", "bgcolor", "border_color", "font_name",
                 "font_height", "font_weight", "italic_flag", "unknown",
                 "SIZE"])
- rect = namedtuple("rect", ["upper_left", "lower_right", "SIZE"])
- rgbquad = namedtuple("rgbquad", ["red", "green", "blue", "reserved", "int",
-            "hex", "SIZE"])
- rgndata = namedtuple("rgndata", ["header_size", "region_type", "num_rects",
-            "buffer_size", "bounds", "rects", "SIZE"])
  trayicon = namedtuple("trayicon", ["mono_size", "mono_dib",
                        "color_size", "color_dib", "SIZE"])
  state = namedtuple("state", ["name", "animations", "SIZE"])
@@ -82,6 +79,13 @@ class ACSParser(object):
  
  acsaudioinfo = namedtuple("acsaudioinfo", ["audio_data", "checksum_maybe",
                  "SIZE"])
+ 
+ rect = namedtuple("rect", ["upper_left", "lower_right", "SIZE"])
+ rgbquad = namedtuple("rgbquad", ["red", "green", "blue", "reserved", "int",
+            "hex", "SIZE"])
+ rgndata = namedtuple("rgndata", ["header_size", "region_type", "num_rects",
+            "buffer_size", "bounds", "rects", "SIZE"])
+ 
  # "Public" methods
  def __init__(self, data):
   self.data = data if isinstance(data, bytes) else bytes(data)
@@ -437,23 +441,6 @@ class ACSParser(object):
    overlay_type, replace_top_image_of_frame, image_index, unknown,
    region_data_flag, x_offset, y_offset, width, height, region_data,
   offset - start)
- def parse_rgndata(self, offset, size):
-  self.check(offset, size)
-  start = offset
-  header_size = self.parse_ulong(offset)
-  region_type = self.parse_ulong(offset + 4)
-  num_rects = self.parse_ulong(offset + 8)
-  buffer_size = self.parse_ulong(offset + 12)
-  bounds = self.parse_rect(offset + 16)
-  offset += 32
-  rects = self.parse_list(offset, num_rects, 0, self.parse_rect,
-                          lambda i: i.SIZE)
-  offset += rects.SIZE
-  if offset - start != size:
-   raise ValueError("malformed rgndata")
-  return self.rgndata(
-   header_size, region_type, num_rects, buffer_size, bounds, rects, size
-  )
  # ACS Image Info List
  def parse_acsimageinfo_list(self, offset, size, *_):
   self.check(offset, size)
@@ -560,6 +547,23 @@ class ACSParser(object):
   int_ = (red * 0x10000) + (green * 0x100) + blue
   hex_ = hex(red)[2:].zfill(2)+hex(green)[2:].zfill(2)+hex(blue)[2:].zfill(2)
   return self.rgbquad(red, green, blue, reserved, int_, hex_, 4)
+ def parse_rgndata(self, offset, size):
+  self.check(offset, size)
+  start = offset
+  header_size = self.parse_ulong(offset)
+  region_type = self.parse_ulong(offset + 4)
+  num_rects = self.parse_ulong(offset + 8)
+  buffer_size = self.parse_ulong(offset + 12)
+  bounds = self.parse_rect(offset + 16)
+  offset += 32
+  rects = self.parse_list(offset, num_rects, 0, self.parse_rect,
+                          lambda i: i.SIZE)
+  offset += rects.SIZE
+  if offset - start != size:
+   raise ValueError("malformed rgndata")
+  return self.rgndata(
+   header_size, region_type, num_rects, buffer_size, bounds, rects, size
+  )
  def parse_list(self, offset, count, count_size, struct_parser, struct_size):
   start = offset
   size = count(offset) if callable(count) else count
