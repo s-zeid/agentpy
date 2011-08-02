@@ -16,7 +16,7 @@ import uuid
 
 from collections import namedtuple
 
-import bitstring
+import bitarray
 
 class AgentCharacter(object):
  def __init__(self, filename):
@@ -94,22 +94,18 @@ class ACSParser(object):
   """Decompress data encoded in the proprietary SACK format."""
   # SACK = Shitty Agent Compression Klusterfuck
   def to_int(bits):
-   bits = bits[:]
-   bits.append("0b" + "0" * (8 - bits.len % 8))
-   bits.byteswap()
-   bits.reverse()
-   return bits.uintle
+   return int(bits.to01()[::-1], 2)
   data = str(data)
   if len(data) < 7 or data[0] != "\x00" or data[-6:] != b"\xFF" * 6:
    raise ValueError("malformed compressed data")
-  #src = bitarray.bitarray(endian="little")
-  #src.fromstring(data)
-  src = bitstring.BitArray(bytes=data)
-  src.byteswap()
-  src.reverse()
+  src = bitarray.bitarray(endian="little")
+  src.fromstring(data)
+  #src = bitstring.BitArray(bytes=data)
+  #src.byteswap()
+  #src.reverse()
   dst = bytearray(dst_size)
   src_n = 8; dst_ip = 0
-  while src_n < src.len:
+  while src_n < src.length():
    #print "==========================================================="
    #print repr(dst[:dst_ip])
    #print "src_n = "+str(src_n)+" bits; dst_ip = "+str(dst_ip)+" bytes"
@@ -490,13 +486,14 @@ class ACSParser(object):
   image_data = self.parse_datablock(offset)
   offset += image_data.SIZE
   if image_compressed:
-   image_data = self.decompress_sack(image_data, ((width + 3) & 0xFC) * height)
+   image_data = self.decompress_sack(image_data, ((width+3) & 0xFC) * height)
   rgndata_size_compressed = self.parse_ulong(offset)
   rgndata_size_uncompressed = self.parse_ulong(offset + 4)
   offset += 8
   rgndata_compressed = bool(rgndata_size_compressed)
   rgndata_size = rgndata_size_compressed or rgndata_size_uncompressed
   rgndata = self.data[offset:offset+rgndata_size]
+  offset += rgndata_size
   if rgndata_compressed:
    rgndata_size = rgndata_size_uncompressed
    rgndata = self.decompress_sack(rgndata, rgndata_size)
