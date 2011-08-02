@@ -50,8 +50,8 @@ class ACSParser(object):
  rect = namedtuple("rect", ["upper_left", "lower_right", "SIZE"])
  rgbquad = namedtuple("rgbquad", ["red", "green", "blue", "reserved", "int",
             "hex", "SIZE"])
- rgndata = namedtuple("rgndata", ["region_type", "num_rects", "buffer_size",
-            "bounds", "rects", "SIZE"])
+ rgndata = namedtuple("rgndata", ["header_size", "region_type", "num_rects",
+            "buffer_size", "bounds", "rects", "SIZE"])
  trayicon = namedtuple("trayicon", ["mono_size", "mono_dib",
                        "color_size", "color_dib", "SIZE"])
  state = namedtuple("state", ["name", "animations", "SIZE"])
@@ -81,7 +81,7 @@ class ACSParser(object):
                       "rgndata_size", "rgndata", "SIZE"])
  # "Public" methods
  def __init__(self, data):
-  self.data = data
+  self.data = data if isinstance(data, bytes) else bytes(data)
   self.size = len(data)
  def parse(self):
   return self.parse_acsheader_test()
@@ -448,24 +448,20 @@ class ACSParser(object):
    region_data_flag, x_offset, y_offset, width, height, region_data,
   offset - start)
  def parse_rgndata(self, offset, size):
-  print "region data yay"
   start = offset
-  print repr(self.data[offset:offset+4])
-  rgndata_size = self.parse_ulong(offset)
-  if rgndata_size != size:
-   raise ValueError("malformed rgndata")
+  header_size = self.parse_ulong(offset)
   region_type = self.parse_ulong(offset + 4)
   num_rects = self.parse_ulong(offset + 8)
   buffer_size = self.parse_ulong(offset + 12)
   bounds = self.parse_rect(offset + 16)
   offset += 32
-  rects = self.parse_list(offset, lambda x: (size-32)/16, 0, self.parse_rect,
+  rects = self.parse_list(offset, num_rects, 0, self.parse_rect,
                           lambda i: i.SIZE)
   offset += rects.SIZE
   if offset - start != size:
    raise ValueError("malformed rgndata")
   return self.rgndata(
-   region_type, num_rects, buffer_size, bounds, rects, size
+   header_size, region_type, num_rects, buffer_size, bounds, rects, size
   )
  # ACS Image Info List
  def parse_acsimageinfo_list(self, offset, size, *_):
@@ -550,10 +546,9 @@ class ACSParser(object):
   int_ = (red * 0x10000) + (green * 0x100) + blue
   hex_ = hex(red)[2:].zfill(2)+hex(green)[2:].zfill(2)+hex(blue)[2:].zfill(2)
   return self.rgbquad(red, green, blue, reserved, int_, hex_, 4)
- def parse_list(self, offset, count_parser, count_size,
-                struct_parser, struct_size):
+ def parse_list(self, offset, count, count_size, struct_parser, struct_size):
   start = offset
-  size = count_parser(offset)
+  size = count(offset) if callable(count) else count
   if callable(count_size): count_size = count_size(size)
   offset += count_size
   ret = []
